@@ -16,7 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
+import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -41,6 +43,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if(StrUtil.isNotBlank(shopJson)){
             //说明缓存值为店铺数据
             //反序列化为java对象
+            //延长缓存过期时间,覆盖
+            renewCacheExpire(key,RedisConstants.CACHE_SHOP_TTL,RedisConstants.HOT_RANDOM_RANGE,shopJson);
             Shop shop = JSONUtil.toBean(shopJson, Shop.class);
             return Result.ok(shop);
         }
@@ -54,14 +58,18 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //说明数据库不存在，缓存空对象
         if(shop==null){
             // 解决缓存穿透：将空值存入缓存，设置较短的过期时间（比如2分钟）
-            stringRedisTemplate.opsForValue().set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+            renewCacheExpire(key,RedisConstants.CACHE_NULL_TTL,RedisConstants.NULL_RANDOM_RANGE,"");
             return Result.fail("店铺不存在");
         }
         //添加有效缓存值
-        stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        renewCacheExpire(key,RedisConstants.CACHE_SHOP_TTL,RedisConstants.HOT_RANDOM_RANGE,JSONUtil.toJsonStr(shop));
         return Result.ok(shop);
     }
 
+    private void renewCacheExpire(String key,Long ttl,Long randomTtl,String json) {
+        Long t=ttl+ ThreadLocalRandom.current().nextLong(randomTtl);
+        stringRedisTemplate.opsForValue().set(key,json,t,TimeUnit.MINUTES);
+    }
 
 
     //把删除缓存和修改数据库在一个事务中

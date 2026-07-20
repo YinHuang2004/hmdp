@@ -7,6 +7,8 @@ public class RedisConstants {
     public static final Long LOGIN_USER_TTL = 30L;
 
     public static final Long CACHE_NULL_TTL = 2L;
+    public static final Long NULL_RANDOM_RANGE = 1L;  // 空对象随机0~60秒
+    public static final Long HOT_RANDOM_RANGE = 5L;    // 热点随机0~5分钟
 
     public static final Long CACHE_SHOP_TTL = 30L;
     public static final String CACHE_SHOP_KEY = "cache:shop:";
