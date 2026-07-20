@@ -8,12 +8,15 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RedisConstants;
 import io.netty.util.internal.StringUtil;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -32,11 +35,50 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        Shop shop = queryWithMutex(id);
-        if (shop == null){
+        //如果有缓存则直接返回，没有缓存则查询数据库并存储到缓存中
+        String key= RedisConstants.CACHE_SHOP_KEY+id;
+        String shopJson = stringRedisTemplate.opsForValue().get(key);
+        if(StrUtil.isNotBlank(shopJson)){
+            //说明缓存值为店铺数据
+            //反序列化为java对象
+            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
+            return Result.ok(shop);
+        }
+        //执行到这里说明缓存值要么为null或者空缓存对象""
+        if(Objects.nonNull(shopJson)){
+            //说明缓存值为""
             return Result.fail("店铺不存在");
         }
+        //说明数据库不存在缓存那么查询数据库，查询完后记得回填缓存(空对象或有效值）
+        Shop shop = this.getById(id);
+        //说明数据库不存在，缓存空对象
+        if(shop==null){
+            // 解决缓存穿透：将空值存入缓存，设置较短的过期时间（比如2分钟）
+            stringRedisTemplate.opsForValue().set(key, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+            return Result.fail("店铺不存在");
+        }
+        //添加有效缓存值
+        stringRedisTemplate.opsForValue().set(key,JSONUtil.toJsonStr(shop),RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
         return Result.ok(shop);
+    }
+
+
+
+    //把删除缓存和修改数据库在一个事务中
+    @Transactional
+    @Override
+    public void updateShop(Shop shop) {
+        boolean isSuccess = updateById(shop);
+        if(!isSuccess){
+            throw new RuntimeException("数据库更新失败");
+        }
+        //删除缓存
+        String key=RedisConstants.CACHE_SHOP_KEY+shop.getId();
+        isSuccess = stringRedisTemplate.delete(key);
+        if(!isSuccess){
+            //缓存删除失败，抛出异常，事务回滚
+            throw new RuntimeException("删除缓存失败");
+        }
     }
 
     //解决缓存穿透和使用互斥锁解决缓存击穿
